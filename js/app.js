@@ -1223,7 +1223,7 @@ const Admin = {
       })
       .join('');
 
-    const recentTickets = DB.getTickets().slice(0, 5);
+    const recentTickets = DB.getAllTickets().slice(0, 5);
     const ticketsHtml = recentTickets.length ? recentTickets.map(t => {
       const cat = DB.getCategoryById(t.categoryId);
       const catName = cat ? cat.name : 'Outro';

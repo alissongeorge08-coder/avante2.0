@@ -38,7 +38,8 @@ const DB = (() => {
   const VEREADORES = []; // Omitindo para economizar espaco, não afeta funcionamento
 
   // Local Memory Cache
-  let _tickets = [];
+  let _tickets = [];   // denúncias aprovadas (mapa/feed público)
+  let _allTickets = []; // todas as denúncias (painel admin)
   let _session = null;
   let _profile = null;
   const MY_SUPPORTED = JSON.parse(localStorage.getItem('avante_supported') || '[]');
@@ -72,42 +73,52 @@ const DB = (() => {
     if (data) _profile = data;
   }
 
+  function mapReport(r) {
+    let lat = 0, lng = 0;
+    if (r.location) {
+      if (typeof r.location === 'string') {
+        const coords = r.location.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+        if (coords) { lng = parseFloat(coords[1]); lat = parseFloat(coords[2]); }
+      } else if (r.location.coordinates) {
+        lng = r.location.coordinates[0];
+        lat = r.location.coordinates[1];
+      }
+    }
+    return {
+      id: r.id,
+      categoryId: r.category_id,
+      description: r.description,
+      lat, lng,
+      address: r.address,
+      status: r.status,
+      image_url: r.image_url,
+      isCritical: r.is_critical,
+      supporters: r.supporters_count,
+      createdAt: new Date(r.created_at).getTime(),
+      userId: r.user_id,
+      nickname: r.profiles?.nickname || 'Cidadão',
+    };
+  }
+
   async function syncTickets() {
     try {
-      const { data, error } = await window.supabaseClient
+      // Busca TODAS as denúncias para o painel admin
+      const { data: allData } = await window.supabaseClient
         .from('reports')
         .select('*, profiles(nickname)')
         .order('created_at', { ascending: false });
 
+      if (allData) _allTickets = allData.map(mapReport);
+
+      // Busca só as aprovadas (em andamento ou resolvidas) para o mapa/feed público
+      const { data, error } = await window.supabaseClient
+        .from('reports')
+        .select('*, profiles(nickname)')
+        .in('status', ['andamento', 'resolvido'])
+        .order('created_at', { ascending: false });
+
       if (data && !error) {
-        _tickets = data.map(r => {
-          let lat = 0, lng = 0;
-          if (r.location) {
-            if (typeof r.location === 'string') {
-              const coords = r.location.match(/POINT\(([^ ]+) ([^ ]+)\)/);
-              if (coords) { lng = parseFloat(coords[1]); lat = parseFloat(coords[2]); }
-            } else if (r.location.coordinates) {
-              lng = r.location.coordinates[0];
-              lat = r.location.coordinates[1];
-            }
-          }
-          
-          return {
-            id: r.id,
-            categoryId: r.category_id,
-            description: r.description,
-            lat: lat,
-            lng: lng,
-            address: r.address,
-            status: r.status,
-            image_url: r.image_url,
-            isCritical: r.is_critical,
-            supporters: r.supporters_count,
-            createdAt: new Date(r.created_at).getTime(),
-            userId: r.user_id,
-            nickname: r.profiles?.nickname || 'Cidadão',
-          };
-        });
+        _tickets = data.map(mapReport);
         window.dispatchEvent(new Event('db_synced'));
       }
     } catch (err) {
@@ -115,9 +126,8 @@ const DB = (() => {
     }
   }
 
-  function getTickets() {
-    return _tickets;
-  }
+  function getTickets() { return _tickets; }
+  function getAllTickets() { return _allTickets; }
 
   async function createTicket(data) {
     if (!_session) {
@@ -252,10 +262,10 @@ const DB = (() => {
   }
 
   function getStats() {
-    const analise = _tickets.filter(t => t.status === STATUS.ANALISE).length;
-    const andamento = _tickets.filter(t => t.status === STATUS.ANDAMENTO).length;
-    const resolvido = _tickets.filter(t => t.status === STATUS.RESOLVIDO).length;
-    return { total: _tickets.length, open: analise + andamento, analise, andamento, resolvido, critical: 0, topBairros: [] };
+    const analise = _allTickets.filter(t => t.status === STATUS.ANALISE).length;
+    const andamento = _allTickets.filter(t => t.status === STATUS.ANDAMENTO).length;
+    const resolvido = _allTickets.filter(t => t.status === STATUS.RESOLVIDO).length;
+    return { total: _allTickets.length, open: analise + andamento, analise, andamento, resolvido, critical: 0, topBairros: [] };
   }
 
   function getEntitiesRanked() { return ENTITIES; }
@@ -269,7 +279,7 @@ const DB = (() => {
     getSession, createSession, login, logout,
     getDeviceId: () => 'dev',
     getPrefs, savePrefs,
-    getTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
+    getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
     getTicketsByDistance, getMyTickets,
     getMailLogs, getMailDispatchCount: () => 0,
     moderateText, isBanned,
