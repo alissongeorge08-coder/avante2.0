@@ -276,6 +276,15 @@
           </div>
         </div>
 
+        <!-- Mini-mapa para ajuste fino do local (arrastar pin) -->
+        <div class="report-section">
+          <label class="report-section-label">Ajuste o local exato (arraste o marcador)</label>
+          <div id="report-mini-map" style="width:100%; height:200px; border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.1);"></div>
+          <span class="geo-label" id="report-drag-hint" style="display:block; margin-top:6px; font-size:0.75rem; color:rgba(255,255,255,0.5);">
+            <i class="ti ti-info-circle"></i> Você pode mover o marcador até 100m do ponto detectado pelo GPS.
+          </span>
+        </div>
+
         <!-- Category Selection -->
         <div class="report-section">
           <label class="report-section-label">Categoria do problema</label>
@@ -498,6 +507,8 @@
 <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nsfwjs@3.0.0/dist/nsfwjs.min.js"></script>
 <script src="js/supabase-config.js"></script>
 <script src="js/db.js"></script>
 <script src="js/tutorial.js"></script>
