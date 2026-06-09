@@ -5,9 +5,9 @@
 
 const DB = (() => {
   // Constants
-  const STATUS = { ANALISE: 'analise', ANDAMENTO: 'andamento', RESOLVIDO: 'resolvido' };
-  const STATUS_LABELS = { analise: 'Enviado para Análise', andamento: 'Em Andamento', resolvido: 'Resolvido' };
-  const STATUS_COLORS = { analise: '#F9D746', andamento: '#64B5F6', resolvido: '#66BB6A' };
+  const STATUS = { ANALISE: 'analise', ANDAMENTO: 'andamento', RESOLVIDO: 'resolvido', REJEITADO: 'rejeitado' };
+  const STATUS_LABELS = { analise: 'Enviado para Análise', andamento: 'Em Andamento', resolvido: 'Resolvido', rejeitado: 'Rejeitado' };
+  const STATUS_COLORS = { analise: '#F9D746', andamento: '#64B5F6', resolvido: '#66BB6A', rejeitado: '#EF5350' };
 
   const CATEGORIES = [
     { id: 1, name: 'Água e Saneamento', icon: 'ti-droplet', color: '#64B5F6', entityIds: ['corsan'] },
@@ -260,24 +260,81 @@ const DB = (() => {
     return _tickets.filter(t => t.userId === _session.user.id);
   }
 
-  // Moderação de texto — lista de termos bloqueados
+  // Moderação de texto — raízes de termos ofensivos (pega variações)
   const BLOCKED_WORDS = [
-    'bunda', 'pelada', 'pelado', 'nude', 'nudez', 'buceta', 'caralho', 'porra',
-    'merda', 'foda', 'foder', 'puta', 'puta', 'piroca', 'pênis', 'penis', 'vagina',
-    'cu', 'cuzão', 'viado', 'corno', 'fdp', 'pqp', 'xoxota', 'rola', 'pinto',
-    'arrombado', 'desgraça', 'vai se fuder', 'vsf', 'krl'
+    'buceta', 'boceta', 'caralho', 'carai', 'cacete', 'porra', 'merda', 'bosta', 'cu', 'cuzao',
+    'cuzudo', 'foda', 'foder', 'fudido', 'fudida', 'fdp', 'filhadaputa', 'filhodaputa', 'fidegua', 'fidumaegua',
+    'puta', 'putaria', 'putona', 'piranha', 'piriguete', 'vagabunda', 'vagabundo', 'vadia', 'rapariga', 'quenga',
+    'meretriz', 'prostituta', 'biscate', 'cadela', 'cadelona', 'galinha', 'periquita', 'pau', 'piroca', 'rola',
+    'pinto', 'pênis', 'penis', 'caceta', 'pica', 'brocha', 'xoxota', 'xereca', 'xavasca', 'ppk',
+    'perereca', 'boquete', 'boqueteiro', 'punheta', 'viado', 'viadinho', 'baitola', 'bicha', 'biba', 'sapatao',
+    'traveco', 'corno', 'chifrudo', 'arrombado', 'escroto', 'babaca', 'otario', 'otaria', 'imbecil', 'idiota',
+    'retardado', 'debil', 'debilmente', 'mongol', 'mongoloide', 'tarado', 'tarada', 'safado', 'safada', 'desgracado',
+    'desgracada', 'maldito', 'maldita', 'nojento', 'nojenta', 'lixo', 'verme', 'escoria', 'vaitomarnocu', 'vaisefuder',
+    'vsf', 'vtnc', 'pqp', 'krl', 'caralhuuu', 'nazista', 'racista', 'macaco', 'crioulo', 'preto',
+    'negro', 'favelado', 'mortodefome', 'estupido', 'estupida', 'burro', 'burra', 'jumento', 'jegue', 'jacu',
+    'trouxa', 'panaca', 'mane', 'lazarento', 'leproso', 'tapado', 'tosco', 'mocorongo', 'energumeno', 'troglodita',
+    'quasimodo', 'esporrado', 'gozada', 'gozado', 'tesao', 'tetuda', 'tetudo', 'nude', 'pelada', 'pelado',
+    'nudez', 'sexo', 'transar', 'gemido', 'masturba', 'siririca', 'punhetar'
   ];
+
+  // Palavras seguras que contêm raízes bloqueadas (evita falso positivo)
+  const SAFE_EXCEPTIONS = ['concurso', 'curso', 'cura', 'curativo', 'document', 'circ', 'percurso', 'escuro', 'obscuro', 'curva', 'curral', 'acude', 'pauta', 'paulo', 'paulista', 'pausa', 'espelho', 'rolar', 'controle', 'patota', 'buraco', 'esburacada', 'esburacado', 'buracos', 'apurado', 'apuracao', 'maduro', 'duro', 'rua', 'grupo', 'capacete', 'pacote'];
+
+  // Normaliza leetspeak e ofuscações: b0c3t4 -> boceta, c@ralho -> caralho
+  function normalizeLeet(text) {
+    let t = text.toLowerCase();
+    // Remove acentos
+    t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Substitui números/símbolos por letras equivalentes
+    const map = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '7':'t', '8':'b', '@':'a', '$':'s', '!':'i', '|':'i', '€':'e', '(':'c' };
+    t = t.replace(/[013457 8@$!|€(]/g, c => map[c] || c);
+    // Remove caracteres não-alfabéticos (separadores como . - _ *)
+    t = t.replace(/[^a-z]/g, '');
+    // Colapsa letras repetidas: caralhooo -> caralho, p u t a -> puta
+    t = t.replace(/(.)\1+/g, '$1');
+    return t;
+  }
+
+  // Normaliza SEM colapsar repetidas (para palavras curtas, mais preciso)
+  function normalizeNoCollapse(text) {
+    let t = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const map = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '7':'t', '8':'b', '@':'a', '$':'s', '!':'i', '|':'i', '€':'e', '(':'c' };
+    t = t.replace(/[013457 8@$!|€(]/g, c => map[c] || c);
+    return t.replace(/[^a-z]/g, '');
+  }
 
   function moderateText(text) {
     if (!text) return [];
-    const lower = text.toLowerCase();
+    const original = text.toLowerCase();
+    const normCollapsed = normalizeLeet(text);     // com colapso (pega "caralhooo")
+    const normPlain = normalizeNoCollapse(text);    // sem colapso (preciso)
     const found = [];
+
     BLOCKED_WORDS.forEach(word => {
-      // \\b garante que casa palavra inteira, evitando falsos positivos
-      const regex = new RegExp('\\b' + word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\b', 'i');
-      if (regex.test(lower)) found.push(word);
+      const wPlain = normalizeNoCollapse(word);
+      const wCollapsed = normalizeLeet(word);
+
+      // Não marca se faz parte de palavra segura
+      const isSafe = SAFE_EXCEPTIONS.some(safe => {
+        const s = normalizeNoCollapse(safe);
+        return s.includes(wPlain) || wPlain.includes(s) && s.length >= 4;
+      });
+      if (isSafe) return;
+
+      if (wPlain.length <= 2) {
+        // Palavras de 1-2 letras (ex: "cu"): exige palavra inteira no texto original
+        const regex = new RegExp('\\b' + word + '\\b', 'i');
+        if (regex.test(original)) found.push(word);
+      } else if (wPlain.length <= 5) {
+        // Palavras curtas: usa versão SEM colapso para evitar falsos positivos
+        if (normPlain.includes(wPlain)) found.push(word);
+      } else {
+        // Palavras longas: pode usar colapso (pega repetições)
+        if (normPlain.includes(wPlain) || normCollapsed.includes(wCollapsed)) found.push(word);
+      }
     });
-    return found;
+    return [...new Set(found)];
   }
   function isBanned() { return false; }
 
