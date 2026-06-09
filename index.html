@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#142C49" />
+  <meta name="description" content="Avante Santa Maria — Plataforma cívica de zeladoria urbana. Registre e acompanhe problemas de infraestrutura na sua cidade." />
+  <title>Avante Santa Maria — Zeladoria Urbana</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Tabler Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <!-- Leaflet MarkerCluster CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="CSS/main.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     SPLASH OVERLAY (fades out after 2s)
+     ============================================================ -->
+<div id="splash-overlay" class="splash-overlay active" aria-label="Carregando">
+  <div class="splash-glow"></div>
+  <div class="splash-brand">
+    <h1 class="splash-title">Avante</h1>
+    <p class="splash-subtitle">Santa Maria</p>
+  </div>
+  <div class="splash-loader">
+    <div class="splash-loader-bar"></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     DESKTOP FRAME WRAPPER (centers phone on desktop)
+     ============================================================ -->
+<div class="desktop-bg" aria-hidden="true"></div>
+<p class="desktop-label" aria-hidden="true">Avante Santa Maria · Protótipo v2.0</p>
+
+<div class="mobile-frame">
+
+  <!-- ============================================================
+       Z-0: MAP CANVAS (permanent, never closes)
+       ============================================================ -->
+  <div id="map-canvas" role="img" aria-label="Mapa de Santa Maria"></div>
+
+  <!-- Map floating stats (on top of the map) -->
+  <div class="map-floating-stats" id="map-floating-stats">
+    <div class="map-stat" id="stat-total">
+      <i class="ti ti-alert-triangle"></i>
+      <span>0</span>
+    </div>
+    <div class="map-stat map-stat-resolved" id="stat-resolved">
+      <i class="ti ti-circle-check"></i>
+      <span>0</span>
+    </div>
+  </div>
+
+  <!-- Heatmap Toggle -->
+  <button class="btn-heatmap-toggle" id="btn-heatmap-toggle" aria-label="Alternar Mapa de Calor">
+    <i class="ti ti-flame"></i> Visão Calor
+  </button>
+
+  <!-- ============================================================
+       BOTTOM SHEET: OCORRÊNCIAS (Left module)
+       ============================================================ -->
+  <div id="sheet-ocorrencias" class="bottom-sheet" role="dialog" aria-label="Ocorrências">
+    <div class="sheet-header">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-title-row">
+        <h2 class="sheet-title"><i class="ti ti-list-search"></i> Ocorrências</h2>
+        <button class="sheet-close-btn" id="close-ocorrencias" aria-label="Fechar">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+      <!-- Segmented Control -->
+      <div class="segmented-control" role="tablist">
+        <button class="seg-tab active" data-tab="perto" role="tab" aria-selected="true">Perto de Mim</button>
+        <button class="seg-tab" data-tab="instituicoes" role="tab" aria-selected="false">Instituições</button>
+      </div>
+    </div>
+    <div class="sheet-body">
+      <!-- Tab A: Perto de Mim -->
+      <div id="tab-perto" class="tab-panel active">
+        <div class="filter-dropdown-wrap" id="filter-chips-perto" aria-label="Filtrar categorias">
+          <div class="filter-select-btn">
+            <i class="ti ti-filter"></i>
+            <select id="feed-filter-select" class="feed-filter-select">
+              <option value="">Todas as Categorias</option>
+              <option value="1">Água e Saneamento</option>
+              <option value="2">Vias e Calçadas</option>
+              <option value="3">Lixo e Limpeza</option>
+              <option value="4">Energia e Iluminação</option>
+              <option value="5">Telecomunicações</option>
+              <option value="6">Transporte e Ônibus</option>
+              <option value="7">Trânsito e Sinalização</option>
+              <option value="8">Ordem Pública</option>
+              <option value="9">Animais Abandonados</option>
+            </select>
+            <i class="ti ti-chevron-down" style="margin-left: auto; pointer-events: none;"></i>
+          </div>
+        </div>
+        <div id="feed-list" class="feed-list" aria-live="polite"></div>
+      </div>
+      <!-- Tab B: Instituições -->
+      <div id="tab-instituicoes" class="tab-panel">
+        <div id="instituicoes-list" class="instituicoes-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BOTTOM SHEET: PERFIL (Right module)
+       ============================================================ -->
+  <div id="sheet-perfil" class="bottom-sheet" role="dialog" aria-label="Minha Conta">
+    <div class="sheet-header">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-title-row">
+        <h2 class="sheet-title"><i class="ti ti-user-circle"></i> Minha Conta</h2>
+        <button class="sheet-close-btn" id="close-perfil" aria-label="Fechar">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+    </div>
+    <div class="sheet-body" id="perfil-body">
+
+      <!-- Anonimato Banner (Dynamic via JS) -->
+      <div id="profile-auth-section">
+        <div class="anon-banner">
+          <div class="anon-icon"><i class="ti ti-shield-lock"></i></div>
+          <div class="anon-text">
+            <strong>Suas denúncias são anônimas</strong>
+            <span>Nenhuma informação pessoal é publicada.</span>
+            <button class="btn btn-ghost" style="margin-top:10px; padding:6px 12px; font-size:0.75rem; width:100%" onclick="SheetCtrl.open('onboarding')">
+              <i class="ti ti-user-plus"></i> Criar Conta / Vincular Perfil
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Minhas Denúncias -->
+      <div class="perfil-section">
+        <h3 class="perfil-section-title">
+          <i class="ti ti-file-text"></i> Minhas Denúncias
+        </h3>
+        <div id="my-reports-list" class="my-reports-list"></div>
+      </div>
+
+      <!-- Preferências de Notificação -->
+      <div class="perfil-section">
+        <h3 class="perfil-section-title">
+          <i class="ti ti-bell"></i> Notificações
+        </h3>
+        <div class="prefs-list">
+          <label class="pref-toggle">
+            <span><i class="ti ti-droplet"></i> Alertas de falta de água</span>
+            <input type="checkbox" id="pref-agua" checked />
+            <span class="toggle-slider"></span>
+          </label>
+          <label class="pref-toggle">
+            <span><i class="ti ti-bolt"></i> Falta de energia</span>
+            <input type="checkbox" id="pref-energia" checked />
+            <span class="toggle-slider"></span>
+          </label>
+          <label class="pref-toggle">
+            <span><i class="ti ti-barrier-block"></i> Bloqueios de via</span>
+            <input type="checkbox" id="pref-vias" checked />
+            <span class="toggle-slider"></span>
+          </label>
+          <label class="pref-toggle">
+            <span><i class="ti ti-bell-ringing"></i> Avisos gerais</span>
+            <input type="checkbox" id="pref-geral" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Contatos Úteis -->
+      <div class="perfil-section">
+        <h3 class="perfil-section-title">
+          <i class="ti ti-phone"></i> Telefones Úteis
+        </h3>
+        <div class="prefs-list">
+          <a href="tel:199" class="legal-link" style="justify-content:space-between"><span style="display:flex; align-items:center; gap:8px"><i class="ti ti-lifebuoy" style="color:var(--alert-red)"></i> Defesa Civil</span> <strong>199</strong></a>
+          <a href="tel:193" class="legal-link" style="justify-content:space-between"><span style="display:flex; align-items:center; gap:8px"><i class="ti ti-flame" style="color:var(--alert-red)"></i> Bombeiros</span> <strong>193</strong></a>
+          <a href="tel:192" class="legal-link" style="justify-content:space-between"><span style="display:flex; align-items:center; gap:8px"><i class="ti ti-ambulance" style="color:var(--alert-red)"></i> SAMU</span> <strong>192</strong></a>
+          <a href="tel:190" class="legal-link" style="justify-content:space-between"><span style="display:flex; align-items:center; gap:8px"><i class="ti ti-shield" style="color:#1351b4"></i> Brigada Militar</span> <strong>190</strong></a>
+        </div>
+      </div>
+
+      <!-- Funções de Privacidade -->
+      <div class="perfil-section">
+        <h3 class="perfil-section-title">
+          <i class="ti ti-lock"></i> Privacidade & Dados
+        </h3>
+        <div class="perfil-legal">
+          <a href="javascript:void(0)" class="legal-link" onclick="SheetCtrl.open('terms')"><i class="ti ti-file-description"></i> Termos de Uso</a>
+          <a href="javascript:void(0)" class="legal-link" onclick="SheetCtrl.open('privacy')"><i class="ti ti-shield"></i> Política de Privacidade</a>
+        </div>
+      </div>
+
+      <!-- Acesso Administrativo (discreto) -->
+      <div class="perfil-section perfil-admin-access">
+        <button id="btn-admin-access" class="admin-access-link">
+          Acesso do Servidor
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: REPORT FLOW (Camera → AI → Details → Submit)
+       ============================================================ -->
+  <div id="modal-report" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Registrar Denúncia">
+    <div class="modal-report-content">
+      <!-- Step: AI Checking (shown after photo capture) -->
+      <div id="report-step-ai" class="report-step" style="display:none">
+        <div class="ai-check-animation">
+          <div class="ai-spinner"></div>
+          <i class="ti ti-brain"></i>
+        </div>
+        <h3>Verificando imagem...</h3>
+        <p>Análise automatizada em andamento</p>
+      </div>
+
+      <!-- Step: AI Rejected -->
+      <div id="report-step-rejected" class="report-step" style="display:none">
+        <div class="report-rejected-icon">
+          <i class="ti ti-alert-octagon"></i>
+        </div>
+        <h3>Conteúdo Inválido</h3>
+        <p>A imagem não atende aos critérios de publicação. Tire uma nova foto do problema.</p>
+        <button class="btn btn-primary" id="btn-retry-photo">
+          <i class="ti ti-camera"></i> Nova Captura
+        </button>
+      </div>
+
+      <!-- Step: Detail Form (after AI approval) -->
+      <div id="report-step-detail" class="report-step" style="display:none">
+        <div class="report-detail-header">
+          <button class="report-back-btn" id="btn-report-close" aria-label="Fechar">
+            <i class="ti ti-x"></i>
+          </button>
+          <h3>Registrar Denúncia</h3>
+        </div>
+
+        <!-- Photo Preview -->
+        <div class="report-photo-preview" id="report-photo-preview"></div>
+
+        <!-- GPS Confirmation -->
+        <div class="report-geo-card">
+          <div class="geo-row">
+            <i class="ti ti-map-pin"></i>
+            <div>
+              <span class="geo-label">Localização confirmada</span>
+              <span class="geo-value" id="report-address">Obtendo localização...</span>
+            </div>
+          </div>
+          <div class="geo-row">
+            <i class="ti ti-gps"></i>
+            <div>
+              <span class="geo-label">Coordenadas GPS</span>
+              <span class="geo-value" id="report-coords">Calculando...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Category Selection -->
+        <div class="report-section">
+          <label class="report-section-label">Categoria do problema</label>
+          <div class="category-grid" id="category-grid" role="radiogroup"></div>
+        </div>
+
+        <!-- Description -->
+        <div class="report-section">
+          <label class="report-section-label" for="report-description">Descrição</label>
+          <div class="description-area">
+            <textarea id="report-description" class="report-textarea"
+              placeholder="Ex: 'Buraco enorme que já causou queda de moto ontem'"
+              maxlength="280" rows="3"></textarea>
+            <div class="char-count" id="char-count" aria-live="polite">0/280</div>
+          </div>
+        </div>
+
+        <!-- Moderation Warning -->
+        <div class="mod-warning" id="mod-warning" role="alert" style="display:none">
+          <i class="ti ti-alert-triangle"></i>
+          <span id="mod-warning-text">Conteúdo suspeito detectado.</span>
+        </div>
+
+        <!-- Submit -->
+        <button class="btn btn-primary btn-full" id="btn-submit-report">
+          <i class="ti ti-send"></i> Enviar Denúncia
+        </button>
+        <p class="report-disclaimer">
+          Ao enviar, a denúncia recebe o status "Enviado para Análise" e aguarda triagem institucional.
+        </p>
+      </div>
+
+      <!-- Step: Success -->
+      <div id="report-step-success" class="report-step" style="display:none">
+        <div class="success-icon-wrap">
+          <i class="ti ti-circle-check"></i>
+        </div>
+        <h3>Denúncia Registrada!</h3>
+        <p class="success-subtitle">Protocolo enviado com sucesso.</p>
+        <div class="success-detail-card" id="success-detail-card"></div>
+        <div class="success-status-badge">
+          <i class="ti ti-clock"></i> Enviado para Análise
+        </div>
+        <p class="success-info">Acompanhe o andamento em <strong>Minha Conta → Minhas Denúncias</strong>.</p>
+        <button class="btn btn-primary btn-full" id="btn-success-close">
+          <i class="ti ti-map"></i> Voltar ao Mapa
+        </button>
+      </div>
+    </div>
+</div>
+
+  <!-- ============================================================
+       MODAL: ADMIN (Acesso do Servidor)
+       ============================================================ -->
+  <div id="modal-admin" class="modal-overlay" role="dialog" aria-label="Painel Administrativo">
+    <div class="modal-admin-content" id="admin-content">
+      <!-- Admin dashboard content injected by JS -->
+    </div>
+  </div>
+
+  <!-- Onboarding Sheet -->
+  <div id="sheet-onboarding" class="bottom-sheet" role="dialog" aria-label="Criar Conta">
+    <div class="sheet-header">
+      <div class="sheet-title-row">
+        <h2 class="sheet-title"><i class="ti ti-user-plus"></i> Criar Conta</h2>
+        <button class="sheet-close-btn" id="close-onboarding" aria-label="Fechar">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+    </div>
+    <div class="sheet-body" style="padding-bottom: 20px;">
+      <div class="onboarding-form">
+        <button class="btn btn-full" id="btn-govbr" style="background:#1351b4; color:#fff; border:none; margin-bottom:8px">
+          <i class="ti ti-fingerprint"></i> Entrar com gov.br
+        </button>
+        <div style="text-align:center; font-size:0.75rem; color:rgba(255,255,255,0.4); margin-bottom:8px">ou preencha os dados abaixo</div>
+        
+        <div class="input-group" id="group-name">
+          <label>Nome Completo (Mantido em Sigilo)</label>
+          <input type="text" id="reg-name" placeholder="Ex: Maria da Silva" />
+        </div>
+        <div class="input-group">
+          <label>E-mail</label>
+          <input type="email" id="reg-email" placeholder="seu@email.com" />
+        </div>
+        <div class="input-group">
+          <label>Senha</label>
+          <input type="password" id="reg-pass" placeholder="Mínimo 6 caracteres" />
+        </div>
+        <div class="input-group" id="group-confirm">
+          <label>Confirmar Senha</label>
+          <input type="password" id="reg-pass-confirm" placeholder="Confirme sua senha" />
+        </div>
+        <p style="font-size: 0.75rem; color: rgba(255,255,255,0.5); margin: 12px 0;">
+          Ao criar conta você concorda com nossos <a href="javascript:void(0)" onclick="SheetCtrl.open('terms')" style="color:var(--accent);">Termos de Uso</a>.
+        </p>
+        <button class="btn btn-accent btn-full" id="btn-register" style="margin-top: 8px;">
+          Criar Conta
+        </button>
+        <button class="btn btn-full" id="btn-toggle-login" style="background:transparent; color:#fff; border:none; margin-top: 8px; font-size:0.8rem;">
+          Já tem uma conta? Entrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Termos de Uso Sheet -->
+  <div id="sheet-terms" class="bottom-sheet" role="dialog" aria-label="Termos de Uso">
+    <div class="sheet-header">
+      <div class="sheet-title-row">
+        <h2 class="sheet-title"><i class="ti ti-file-description"></i> Termos de Uso</h2>
+        <button class="sheet-close-btn" id="close-terms" aria-label="Fechar">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+    </div>
+    <div class="sheet-body legal-content" style="padding-bottom: 40px;">
+      <h3>TERMOS DE USO - AVANTE SANTA MARIA</h3>
+      
+      <h4>1. Objetivo do Aplicativo</h4>
+      <p>O AVANTE Santa Maria é uma plataforma cívica de zeladoria urbana que permite aos cidadãos reportarem problemas de infraestrutura na cidade (ex: buracos, vazamentos) para fins de transparência.</p>
+
+      <h4>2. Cadastro e Responsabilidade</h4>
+      <p>É necessário criar uma conta informando dados reais. O usuário se compromete a fornecer informações verdadeiras. É proibido o uso da plataforma para envio de fotos falsas, conteúdo difamatório, nudez ou material não relacionado à zeladoria.</p>
+
+      <h4>3. Regras de Envio de Denúncias (Antifraude)</h4>
+      <p>Para garantir a veracidade:</p>
+      <ul>
+        <li><strong>Câmera Obrigatória:</strong> O envio de imagens da galeria é bloqueado. Toda denúncia exige foto capturada na hora.</li>
+        <li><strong>Validação de GPS:</strong> O GPS deve estar ativo. O sistema exige que a denúncia seja feita no local exato, com margem de tolerância máxima de 15 metros.</li>
+      </ul>
+
+      <h4>4. Moderação</h4>
+      <p>Nenhuma denúncia é publicada imediatamente. Todo envio passa por verificação preliminar por Inteligência Artificial (Visão Computacional) e recebe o status de "Enviado para Análise".</p>
+
+      <h4>5. Uso Indevido</h4>
+      <p>A criação de falsos chamados resultará no banimento permanente do dispositivo e da conta.</p>
+    </div>
+  </div>
+
+  <!-- Política de Privacidade Sheet -->
+  <div id="sheet-privacy" class="bottom-sheet" role="dialog" aria-label="Política de Privacidade">
+    <div class="sheet-header">
+      <div class="sheet-title-row">
+        <h2 class="sheet-title"><i class="ti ti-shield"></i> Política de Privacidade</h2>
+        <button class="sheet-close-btn" id="close-privacy" aria-label="Fechar">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+    </div>
+    <div class="sheet-body legal-content" style="padding-bottom: 40px;">
+      <h3>POLÍTICA DE PRIVACIDADE - AVANTE SANTA MARIA</h3>
+
+      <h4>1. Proteção de Dados (LGPD)</h4>
+      <p>O AVANTE coleta Nome, E-mail, Senha (criptografada) e geolocalização no momento da denúncia, obedecendo à LGPD (Lei nº 13.709/2018).</p>
+
+      <h4>2. O Princípio do "Anonimato Padrão"</h4>
+      <p>Para proteger o cidadão contra represálias, seus dados pessoais reais nunca serão exibidos publicamente. O sistema gera um identificador aleatório (Ex: Cidadão_4092) que acompanhará suas denúncias públicas.</p>
+
+      <h4>3. Contas Verificadas</h4>
+      <p>Apenas contas pertencentes a figuras públicas (ex: Vereadores) terão nomes e cargos exibidos publicamente para transparência de mandato.</p>
+
+      <h4>4. Compartilhamento</h4>
+      <p>As denúncias (foto, localização, problema) são compartilhadas em formato de painel com a Prefeitura e concessionárias. Em nenhuma hipótese seu nome ou e-mail serão repassados.</p>
+
+      <h4>5. Permissões</h4>
+      <p>O aplicativo solicitará acesso à Câmera e ao GPS exclusivamente para a função de captura. Não rastreamos localização em segundo plano.</p>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: GENERIC ALERT
+       ============================================================ -->
+  <div id="modal-alert" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="modal-alert-box" id="modal-alert-box"></div>
+  </div>
+
+  <!-- ============================================================
+       INCIDENT POPUP (on map marker click)
+       ============================================================ -->
+  <div class="incident-popup" id="incident-popup" role="dialog" aria-label="Detalhes do incidente"></div>
+
+  <!-- ============================================================
+       TOAST CONTAINER
+       ============================================================ -->
+  <div class="toast-container" id="toast-container" role="alert" aria-live="polite"></div>
+
+  <!-- Hidden Camera Input -->
+  <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none" aria-label="Capturar foto" />
+
+  <!-- ============================================================
+       BOTTOM NAVIGATION (3 buttons)
+       ============================================================ -->
+  <nav id="bottom-nav" class="bottom-nav" role="navigation" aria-label="Navegação principal">
+    <button class="nav-btn" id="nav-ocorrencias" aria-label="Ocorrências">
+      <i class="ti ti-list-search"></i>
+      <span>Ocorrências</span>
+    </button>
+    <button class="nav-btn nav-foto-btn" id="nav-foto" aria-label="Tirar Foto">
+      <div class="nav-foto-ring">
+        <i class="ti ti-camera-filled"></i>
+      </div>
+    </button>
+    <button class="nav-btn" id="nav-perfil" aria-label="Perfil">
+      <i class="ti ti-user"></i>
+      <span>Perfil</span>
+    </button>
+  </nav>
+
+
+
+</div><!-- /.mobile-frame -->
+
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-config.js"></script>
+<script src="js/db.js"></script>
+<script src="js/tutorial.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
