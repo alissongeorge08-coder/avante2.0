@@ -279,7 +279,7 @@ const DB = (() => {
     getSession, createSession, login, logout,
     getDeviceId: () => 'dev',
     getPrefs, savePrefs,
-    getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
+    syncTickets, getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
     getTicketsByDistance, getMyTickets,
     getMailLogs, getMailDispatchCount: () => 0,
     moderateText, isBanned,

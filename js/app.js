@@ -309,7 +309,7 @@ function showIncidentPopup(ticket) {
         </div>
         <div class="incident-status" style="background:${statusColor}20; color:${statusColor}; border: 1px solid ${statusColor}40">${statusLabel}</div>
       </div>
-      ${ticket.photoData ? `<img src="${ticket.photoData}" alt="Foto da denúncia" class="incident-photo" />` : ''}
+      ${(ticket.image_url || ticket.photoData) ? `<img src="${ticket.image_url || ticket.photoData}" alt="Foto da denúncia" class="incident-photo" />` : ''}
       <p class="incident-desc">${ticket.description}</p>
       <div class="incident-meta">
         <span><i class="ti ti-map-pin"></i> ${ticket.address}</span>
@@ -457,8 +457,8 @@ const Feed = {
         const statusColor = DB.STATUS_COLORS[ticket.status] || '#999';
         const supported = DB.isSupported(ticket.id);
         const verifiedBadge = ticket.isGovVerified ? `<i class="ti ti-rosette-discount-check-filled" style="color: #1351b4; margin-left:4px" title="Cidadão Verificado via Gov.br"></i>` : '';
-        const photoHtml = ticket.photoData
-          ? `<div class="feed-card-media" onclick="event.stopPropagation(); window.open('${ticket.photoData}', '_blank')"><img src="${ticket.photoData}" alt="Foto da denúncia" class="feed-card-img" /></div>`
+        const photoHtml = (ticket.image_url || ticket.photoData)
+          ? `<div class="feed-card-media" onclick="event.stopPropagation(); window.open('${ticket.image_url || ticket.photoData}', '_blank')"><img src="${ticket.image_url || ticket.photoData}" alt="Foto da denúncia" class="feed-card-img" /></div>`
           : '';
 
         const eduHtml = (cat && cat.educationalContent) ? `
@@ -738,7 +738,6 @@ const Report = {
     });
     document.getElementById('btn-success-close')?.addEventListener('click', () => {
       this.reset();
-      MapCtrl.renderMarkers();
       MapCtrl.updateStats();
     });
     document.getElementById('btn-submit-report')?.addEventListener('click', () => {
@@ -1035,8 +1034,7 @@ const Report = {
         </div>
       `;
     }
-    Toast.show('success', 'Denúncia registrada', 'Protocolo enviado com sucesso.');
-    MapCtrl.renderMarkers();
+    Toast.show('success', 'Denúncia registrada', 'Protocolo enviado com sucesso. Aguardando aprovação.');
     MapCtrl.updateStats();
   },
 
@@ -1148,8 +1146,11 @@ const Admin = {
   async approveTicket(id) {
     const success = await DB.updateTicketStatus(id, 'andamento');
     if (success) {
-      Toast.show('success', 'Aprovada!', 'Denúncia movida para Em Andamento.');
+      Toast.show('success', 'Aprovada!', 'Denúncia aprovada e publicada no mapa.');
+      await DB.syncTickets();
       this.showDashboard();
+      MapCtrl.renderMarkers();
+      MapCtrl.updateStats();
     }
   },
 
@@ -1157,7 +1158,10 @@ const Admin = {
     const success = await DB.updateTicketStatus(id, 'resolvido');
     if (success) {
       Toast.show('info', 'Arquivada', 'A denúncia foi arquivada.');
+      await DB.syncTickets();
       this.showDashboard();
+      MapCtrl.renderMarkers();
+      MapCtrl.updateStats();
     }
   },
 
