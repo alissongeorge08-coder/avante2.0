@@ -968,11 +968,15 @@ const Report = {
           .from('report_images')
           .upload(fileName, blob, { contentType: 'image/jpeg' });
           
-        if (!uploadError) {
+        if (uploadError) {
+          console.error("FALHA NO UPLOAD DA IMAGEM:", uploadError);
+          Toast.show('warning', 'Aviso', 'A foto não pôde ser enviada, mas a denúncia será registrada.');
+        } else {
           const { data: urlData } = window.supabaseClient.storage
             .from('report_images')
             .getPublicUrl(fileName);
           finalImageUrl = urlData.publicUrl;
+          console.log("Imagem enviada com sucesso:", finalImageUrl);
         }
       } catch (e) {
         console.error("Erro no upload", e);
@@ -1144,10 +1148,11 @@ const Admin = {
   },
 
   async approveTicket(id) {
+    const btn = document.querySelector(`button[onclick="Admin.approveTicket('${id}')"]`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Aprovando...'; }
     const success = await DB.updateTicketStatus(id, 'andamento');
     if (success) {
       Toast.show('success', 'Aprovada!', 'Denúncia aprovada e publicada no mapa.');
-      await DB.syncTickets();
       this.showDashboard();
       MapCtrl.renderMarkers();
       MapCtrl.updateStats();
@@ -1155,10 +1160,11 @@ const Admin = {
   },
 
   async rejectTicket(id) {
+    const btn = document.querySelector(`button[onclick="Admin.rejectTicket('${id}')"]`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Rejeitando...'; }
     const success = await DB.updateTicketStatus(id, 'resolvido');
     if (success) {
       Toast.show('info', 'Arquivada', 'A denúncia foi arquivada.');
-      await DB.syncTickets();
       this.showDashboard();
       MapCtrl.renderMarkers();
       MapCtrl.updateStats();
@@ -1168,6 +1174,25 @@ const Admin = {
   showDashboard() {
     const content = document.getElementById('admin-content');
     if (!content) return;
+
+    // Verifica se o usuário está logado como admin/instituição
+    if (!DB.isAdmin()) {
+      content.innerHTML = `
+        <div class="admin-pin-screen">
+          <button class="admin-close-btn" onclick="Admin.close()" aria-label="Fechar">
+            <i class="ti ti-x"></i>
+          </button>
+          <div class="admin-pin-icon"><i class="ti ti-shield-lock"></i></div>
+          <h3>Acesso Restrito</h3>
+          <p style="margin-bottom:20px;">Você precisa estar logado com uma conta de servidor/instituição para acessar o painel de moderação.</p>
+          <button class="btn btn-primary" onclick="Admin.close(); SheetCtrl.open('perfil');" style="padding:10px 20px;">
+            <i class="ti ti-login"></i> Ir para Login
+          </button>
+        </div>
+      `;
+      return;
+    }
+
     const stats = DB.getStats();
     const logs = DB.getMailLogs();
     const resolutionRate = stats.total > 0 ? Math.round((stats.resolvido / stats.total) * 100) : 0;
@@ -1236,6 +1261,9 @@ const Admin = {
       const timeAgo = Math.floor((Date.now() - t.createdAt) / 60000);
       const timeStr = timeAgo < 60 ? `${timeAgo}m atrás` : `${Math.floor(timeAgo/60)}h atrás`;
       const verifiedBadge = t.isGovVerified ? `<i class="ti ti-rosette-discount-check-filled" style="color: #1351b4; margin-left:4px" title="Verificado"></i>` : '';
+      const adminPhoto = (t.image_url || t.photoData)
+        ? `<img src="${t.image_url || t.photoData}" alt="Foto" style="width:100%; max-height:160px; object-fit:cover; border-radius:8px; margin-bottom:8px;" onclick="window.open('${t.image_url || t.photoData}','_blank')" />`
+        : '';
       return `
         <div class="admin-ticket-card">
           <div class="admin-ticket-header">
@@ -1243,6 +1271,7 @@ const Admin = {
             <span class="admin-ticket-status" style="color:${statusColor}">${statusLabel}</span>
           </div>
           <div class="admin-ticket-body">
+            ${adminPhoto}
             <p>${t.description}</p>
             <div class="admin-ticket-meta">
               <span><i class="ti ti-map-pin"></i> ${t.address}</span>

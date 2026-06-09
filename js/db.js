@@ -100,7 +100,7 @@ const DB = (() => {
     };
   }
 
-  async function syncTickets() {
+  async function syncTickets(silent = false) {
     try {
       // Busca TODAS as denúncias para o painel admin
       const { data: allData } = await window.supabaseClient
@@ -119,7 +119,7 @@ const DB = (() => {
 
       if (data && !error) {
         _tickets = data.map(mapReport);
-        window.dispatchEvent(new Event('db_synced'));
+        if (!silent) window.dispatchEvent(new Event('db_synced'));
       }
     } catch (err) {
       console.error("Erro no syncTickets:", err);
@@ -162,7 +162,7 @@ const DB = (() => {
       console.error(error);
       return false;
     }
-    await syncTickets();
+    await syncTickets(true); // silent: app.js controla o re-render manualmente
     return true;
   }
 
@@ -192,8 +192,12 @@ const DB = (() => {
     return {
       nickname: _profile?.nickname || 'Cidadão',
       email: _session.user.email,
-      isGovVerified: _profile?.role === 'institution'
+      isGovVerified: _profile?.role === 'institution' || _profile?.role === 'admin'
     };
+  }
+
+  function isAdmin() {
+    return _profile?.role === 'admin' || _profile?.role === 'institution';
   }
 
   async function createSession(name, email, password) {
@@ -276,7 +280,7 @@ const DB = (() => {
     init,
     STATUS, STATUS_LABELS, STATUS_COLORS,
     CATEGORIES, ENTITIES, VEREADORES,
-    getSession, createSession, login, logout,
+    getSession, isAdmin, createSession, login, logout,
     getDeviceId: () => 'dev',
     getPrefs, savePrefs,
     syncTickets, getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
