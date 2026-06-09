@@ -166,6 +166,17 @@ const DB = (() => {
     return true;
   }
 
+  async function deleteTicket(id) {
+    const { error } = await window.supabaseClient.from('reports').delete().eq('id', id);
+    if (error) {
+      Toast.show('error', 'Erro', 'Falha ao excluir denúncia.');
+      console.error(error);
+      return false;
+    }
+    await syncTickets(true);
+    return true;
+  }
+
   async function supportTicket(ticketId) {
     if (isSupported(ticketId)) return;
     if (!_session) return; // Supabase RLS exigiria auth
@@ -249,8 +260,25 @@ const DB = (() => {
     return _tickets.filter(t => t.userId === _session.user.id);
   }
 
-  // Mock Moderation (we keep it simple for now)
-  function moderateText(text) { return []; }
+  // Moderação de texto — lista de termos bloqueados
+  const BLOCKED_WORDS = [
+    'bunda', 'pelada', 'pelado', 'nude', 'nudez', 'buceta', 'caralho', 'porra',
+    'merda', 'foda', 'foder', 'puta', 'puta', 'piroca', 'pênis', 'penis', 'vagina',
+    'cu', 'cuzão', 'viado', 'corno', 'fdp', 'pqp', 'xoxota', 'rola', 'pinto',
+    'arrombado', 'desgraça', 'vai se fuder', 'vsf', 'krl'
+  ];
+
+  function moderateText(text) {
+    if (!text) return [];
+    const lower = text.toLowerCase();
+    const found = [];
+    BLOCKED_WORDS.forEach(word => {
+      // \\b garante que casa palavra inteira, evitando falsos positivos
+      const regex = new RegExp('\\b' + word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '\\b', 'i');
+      if (regex.test(lower)) found.push(word);
+    });
+    return found;
+  }
   function isBanned() { return false; }
 
   // Preferences
@@ -283,7 +311,7 @@ const DB = (() => {
     getSession, isAdmin, createSession, login, logout,
     getDeviceId: () => 'dev',
     getPrefs, savePrefs,
-    syncTickets, getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus,
+    syncTickets, getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus, deleteTicket,
     getTicketsByDistance, getMyTickets,
     getMailLogs, getMailDispatchCount: () => 0,
     moderateText, isBanned,

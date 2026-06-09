@@ -721,6 +721,9 @@ const Report = {
     photoData: null,
     lat: null,
     lng: null,
+    gpsLat: null,
+    gpsLng: null,
+    gpsReal: false,
     address: '',
     categoryId: null,
   },
@@ -788,25 +791,27 @@ const Report = {
         ctx.drawImage(img, 0, 0, width, height);
         this.state.photoData = canvas.toDataURL('image/jpeg', 0.6);
 
-        // Get GPS
+        // Get GPS — guarda a posição original do GPS para validar arrasto depois
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (pos) => {
               this.state.lat = pos.coords.latitude;
               this.state.lng = pos.coords.longitude;
+              this.state.gpsLat = pos.coords.latitude; // âncora original do GPS
+              this.state.gpsLng = pos.coords.longitude;
+              this.state.gpsReal = true;
               this.reverseGeocode(this.state.lat, this.state.lng);
             },
             () => {
-              this.state.lat = MapCtrl.userLat;
-              this.state.lng = MapCtrl.userLng;
-              this.state.address = 'Santa Maria, RS';
+              this.state.gpsReal = false;
+              this.state.address = 'Localização indisponível';
+              this.updateGeoUI();
             },
             { enableHighAccuracy: true, timeout: 8000 }
           );
         } else {
-          this.state.lat = MapCtrl.userLat;
-          this.state.lng = MapCtrl.userLng;
-          this.state.address = 'Santa Maria, RS';
+          this.state.gpsReal = false;
+          this.state.address = 'Localização indisponível';
         }
         this.showAICheck();
       };
@@ -846,21 +851,50 @@ const Report = {
     }
   },
 
-  showAICheck() {
+  async showAICheck() {
     const modal = document.getElementById('modal-report');
     if (modal) modal.classList.add('open');
     history.pushState({ report: true }, '');
     this.hideAllSteps();
     const aiStep = document.getElementById('report-step-ai');
     if (aiStep) aiStep.style.display = 'flex';
-    setTimeout(() => {
-      const pass = Math.random() < 0.95;
-      if (pass) {
-        this.onAIApprove();
-      } else {
-        this.onAIReject();
+
+    const approved = await this.moderateImage(this.state.photoData);
+    if (approved) {
+      this.onAIApprove();
+    } else {
+      this.onAIReject();
+    }
+  },
+
+  // Moderação de imagem com NSFWJS (roda 100% no navegador, sem custo)
+  async moderateImage(dataUrl) {
+    try {
+      if (typeof nsfwjs === 'undefined' || !dataUrl) {
+        // Se a lib não carregou, aprova por padrão para não travar o fluxo
+        return true;
       }
-    }, 2000);
+      if (!this._nsfwModel) {
+        this._nsfwModel = await nsfwjs.load();
+      }
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((res) => { img.onload = res; });
+      const predictions = await this._nsfwModel.classify(img);
+
+      // Soma as probabilidades de conteúdo impróprio
+      let impróprio = 0;
+      predictions.forEach(p => {
+        if (['Porn', 'Hentai', 'Sexy'].includes(p.className)) {
+          impróprio += p.probability;
+        }
+      });
+      // Reprova se a soma de conteúdo impróprio passar de 50%
+      return impróprio < 0.5;
+    } catch (e) {
+      console.error('Erro na moderação de imagem:', e);
+      return true; // em caso de erro, não bloqueia o cidadão legítimo
+    }
   },
 
   onAIApprove() {
@@ -874,6 +908,68 @@ const Report = {
     }
     this.updateGeoUI();
     this.buildCategoryGrid();
+    // Inicializa o mini-mapa arrastável após o layout renderizar
+    setTimeout(() => this.initMiniMap(), 300);
+  },
+
+  initMiniMap() {
+    if (!this.state.lat || typeof L === 'undefined') return;
+    const container = document.getElementById('report-mini-map');
+    if (!container) return;
+
+    // Remove instância anterior se existir
+    if (this._miniMap) {
+      this._miniMap.remove();
+      this._miniMap = null;
+    }
+
+    const gpsLat = this.state.gpsLat || this.state.lat;
+    const gpsLng = this.state.gpsLng || this.state.lng;
+
+    this._miniMap = L.map('report-mini-map', {
+      center: [gpsLat, gpsLng],
+      zoom: 17,
+      zoomControl: true,
+      attributionControl: false,
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this._miniMap);
+
+    // Círculo do raio de segurança (100m a partir do GPS)
+    this._radiusCircle = L.circle([gpsLat, gpsLng], {
+      radius: 100,
+      color: '#64B5F6',
+      fillColor: '#64B5F6',
+      fillOpacity: 0.1,
+      weight: 1,
+    }).addTo(this._miniMap);
+
+    // Marcador arrastável
+    this._dragMarker = L.marker([this.state.lat, this.state.lng], { draggable: true }).addTo(this._miniMap);
+
+    this._dragMarker.on('dragend', (e) => {
+      const pos = e.target.getLatLng();
+      const dist = DB.getDistance(gpsLat, gpsLng, pos.lat, pos.lng);
+      const hint = document.getElementById('report-drag-hint');
+
+      if (dist > 100) {
+        // Volta o marcador para dentro do raio
+        this._dragMarker.setLatLng([this.state.lat, this.state.lng]);
+        if (hint) {
+          hint.innerHTML = '<i class="ti ti-alert-triangle"></i> Fora do limite! O marcador deve ficar a até 100m do GPS.';
+          hint.style.color = '#EF5350';
+        }
+        Toast.show('warning', 'Limite excedido', 'Mantenha o marcador dentro do círculo azul (100m).');
+      } else {
+        // Atualiza a posição válida
+        this.state.lat = pos.lat;
+        this.state.lng = pos.lng;
+        this.reverseGeocode(pos.lat, pos.lng);
+        if (hint) {
+          hint.innerHTML = `<i class="ti ti-check"></i> Local ajustado (${Math.round(dist)}m do GPS).`;
+          hint.style.color = '#66BB6A';
+        }
+      }
+    });
   },
 
   onAIReject() {
@@ -951,6 +1047,23 @@ const Report = {
     if (desc.length < 10) {
       Toast.show('warning', 'Descrição curta', 'Descreva o problema com pelo menos 10 caracteres.');
       return;
+    }
+    const violations = DB.moderateText(desc);
+    if (violations.length > 0) {
+      Toast.show('error', 'Conteúdo impróprio', 'Sua descrição contém termos não permitidos. Revise o texto.');
+      return;
+    }
+    if (!this.state.gpsReal || this.state.lat == null) {
+      Toast.show('error', 'GPS obrigatório', 'Ative a localização para registrar a denúncia no local correto.');
+      return;
+    }
+    // Valida que o pin não foi arrastado para muito longe do GPS (máx 100m)
+    if (this.state.gpsLat != null) {
+      const dist = DB.getDistance(this.state.gpsLat, this.state.gpsLng, this.state.lat, this.state.lng);
+      if (dist > 100) {
+        Toast.show('error', 'Localização inválida', 'O ponto está muito distante da sua posição real. Aproxime o marcador.');
+        return;
+      }
     }
     
     Toast.show('info', 'Enviando...', 'Processando denúncia e fazendo upload da foto...', 3000);
@@ -1043,7 +1156,8 @@ const Report = {
   },
 
   reset() {
-    this.state = { photoData: null, lat: null, lng: null, address: '', categoryId: null };
+    this.state = { photoData: null, lat: null, lng: null, gpsLat: null, gpsLng: null, gpsReal: false, address: '', categoryId: null };
+    if (this._miniMap) { this._miniMap.remove(); this._miniMap = null; }
     const modal = document.getElementById('modal-report');
     if (modal) modal.classList.remove('open');
     this.hideAllSteps();
@@ -1171,6 +1285,29 @@ const Admin = {
     }
   },
 
+  deleteTicket(id) {
+    Modal.open({
+      icon: 'ti-trash',
+      iconClass: 'modal-icon-danger',
+      title: 'Excluir denúncia?',
+      body: 'Esta ação é permanente e não pode ser desfeita. A denúncia será removida completamente do banco de dados.',
+      actions: [
+        { id: 'btn-del-cancel', label: 'Cancelar', class: 'btn-ghost', onClick: () => Modal.close() },
+        { id: 'btn-del-confirm', label: 'Excluir', class: 'btn-primary', onClick: async () => {
+            Modal.close();
+            const success = await DB.deleteTicket(id);
+            if (success) {
+              Toast.show('success', 'Excluída', 'A denúncia foi removida permanentemente.');
+              this.showDashboard();
+              MapCtrl.renderMarkers();
+              MapCtrl.updateStats();
+            }
+          }
+        },
+      ],
+    });
+  },
+
   showDashboard() {
     const content = document.getElementById('admin-content');
     if (!content) return;
@@ -1283,6 +1420,7 @@ const Admin = {
                <button class="btn btn-ghost" onclick="Admin.rejectTicket('${t.id}')" style="flex:1; padding: 6px 12px; font-size:0.8rem; color: var(--alert-red);"><i class="ti ti-x"></i> Rejeitar</button>
             </div>
             ` : ''}
+            <button class="btn btn-ghost" onclick="Admin.deleteTicket('${t.id}')" style="margin-top:8px; width:100%; padding: 6px 12px; font-size:0.8rem; color: var(--alert-red); border:1px solid var(--alert-red);"><i class="ti ti-trash"></i> Excluir Permanentemente</button>
           </div>
         </div>
       `;
