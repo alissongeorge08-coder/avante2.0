@@ -129,28 +129,117 @@ const DB = (() => {
   function getTickets() { return _tickets; }
   function getAllTickets() { return _allTickets; }
 
+  // ─── FILA OFFLINE ───────────────────────────────────────────
+  // Denúncias capturadas sem internet ficam salvas localmente
+  // e são reenviadas automaticamente quando a conexão volta.
+  const OFFLINE_KEY = 'avante_offline_queue';
+
+  function getOfflineQueue() {
+    return JSON.parse(localStorage.getItem(OFFLINE_KEY) || '[]');
+  }
+
+  function saveOfflineQueue(queue) {
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(queue));
+    window.dispatchEvent(new Event('offline_queue_changed'));
+  }
+
+  function addToOfflineQueue(data) {
+    const queue = getOfflineQueue();
+    queue.push({
+      ...data,
+      offlineId: 'off_' + Date.now() + '_' + Math.random().toString(36).substring(7),
+      capturedAt: Date.now(),
+    });
+    saveOfflineQueue(queue);
+  }
+
+  function getOfflineCount() {
+    return getOfflineQueue().length;
+  }
+
+  // Tenta reenviar todas as denúncias pendentes
+  async function processOfflineQueue() {
+    if (!navigator.onLine || !_session) return;
+    const queue = getOfflineQueue();
+    if (queue.length === 0) return;
+
+    let remaining = [];
+    let enviadas = 0;
+
+    for (const item of queue) {
+      const result = await _insertReport(item);
+      if (result) {
+        enviadas++;
+      } else {
+        remaining.push(item); // falhou, mantém na fila
+      }
+    }
+
+    saveOfflineQueue(remaining);
+    if (enviadas > 0) {
+      Toast.show('success', 'Denúncias enviadas', `${enviadas} denúncia(s) pendente(s) foram enviadas com sucesso.`);
+      await syncTickets();
+    }
+  }
+
+  // Faz o insert puro no Supabase (usado online e no reenvio offline)
+  async function _insertReport(data) {
+    if (!_session) return null;
+    try {
+      let imageUrl = data.photoData;
+      // Se a imagem ainda é base64 (capturada offline), faz upload agora
+      if (imageUrl && imageUrl.startsWith('data:image')) {
+        const res = await fetch(imageUrl);
+        const blob = await res.blob();
+        const fileName = `incident_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const { error: upErr } = await window.supabaseClient.storage
+          .from('report_images').upload(fileName, blob, { contentType: 'image/jpeg' });
+        if (!upErr) {
+          const { data: urlData } = window.supabaseClient.storage
+            .from('report_images').getPublicUrl(fileName);
+          imageUrl = urlData.publicUrl;
+        }
+      }
+
+      const { data: inserted, error } = await window.supabaseClient.from('reports').insert([{
+        user_id: _session.user.id,
+        category_id: data.categoryId,
+        description: data.description,
+        location: `POINT(${data.lng} ${data.lat})`,
+        address: data.address,
+        status: STATUS.ANALISE,
+        image_url: imageUrl
+      }]).select().single();
+
+      if (error) { console.error('Insert error:', error); return null; }
+      return inserted;
+    } catch (e) {
+      console.error('Erro no _insertReport:', e);
+      return null;
+    }
+  }
+
   async function createTicket(data) {
     if (!_session) {
       Toast.show('error', 'Acesso negado', 'Você precisa estar logado para reportar.');
       return;
     }
 
-    const { data: inserted, error } = await window.supabaseClient.from('reports').insert([{
-      user_id: _session.user.id,
-      category_id: data.categoryId,
-      description: data.description,
-      location: `POINT(${data.lng} ${data.lat})`,
-      address: data.address,
-      status: STATUS.ANALISE,
-      image_url: data.photoData
-    }]).select().single();
-
-    if (error) {
-      Toast.show('error', 'Erro', 'Falha ao salvar denúncia.');
-      console.error(error);
-      return null;
+    // Sem internet: salva na fila offline para reenvio automático depois
+    if (!navigator.onLine) {
+      addToOfflineQueue(data);
+      Toast.show('info', 'Salvo offline', 'Sem conexão. A denúncia foi salva e será enviada automaticamente quando a internet voltar.');
+      return { offline: true };
     }
-    
+
+    const inserted = await _insertReport(data);
+    if (!inserted) {
+      // Falhou online (pode ter caído a conexão no meio): salva offline
+      addToOfflineQueue(data);
+      Toast.show('warning', 'Salvo offline', 'Não foi possível enviar agora. A denúncia será reenviada automaticamente.');
+      return { offline: true };
+    }
+
     await syncTickets();
     return inserted;
   }
@@ -369,6 +458,7 @@ const DB = (() => {
     getDeviceId: () => 'dev',
     getPrefs, savePrefs,
     syncTickets, getTickets, getAllTickets, createTicket, supportTicket, isSupported, updateTicketStatus, deleteTicket,
+    getOfflineCount, processOfflineQueue, getOfflineQueue,
     getTicketsByDistance, getMyTickets,
     getMailLogs, getMailDispatchCount: () => 0,
     moderateText, isBanned,

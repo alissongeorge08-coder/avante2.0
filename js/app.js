@@ -4,6 +4,24 @@
  */
 
 /* ============================================================
+   0. CONFIGURAÇÃO GLOBAL
+   ============================================================ */
+const CONFIG = {
+  // Limites geográficos de Santa Maria/RS (mesmo bounding box do mapa)
+  CITY_BOUNDS: { minLat: -29.85, maxLat: -29.55, minLng: -53.95, maxLng: -53.60 },
+  // Precisão máxima aceitável do GPS em metros (acima disso = impreciso, ex: IP/WiFi)
+  MAX_GPS_ACCURACY: 100,
+  // MODO DEV: libera o pin em qualquer lugar de Santa Maria para testes
+  // ⚠️ TROCAR PARA false ANTES DE PUBLICAR PARA OS CIDADÃOS
+  DEV_MODE: true,
+};
+
+function isInSantaMaria(lat, lng) {
+  const b = CONFIG.CITY_BOUNDS;
+  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+}
+
+/* ============================================================
    1. TOAST SYSTEM
    ============================================================ */
 const Toast = {
@@ -644,7 +662,33 @@ const ProfileCtrl = {
     }
   },
 
+  renderOfflineBadge() {
+    const list = document.getElementById('my-reports-list');
+    if (!list) return;
+    const count = DB.getOfflineCount();
+    let badge = document.getElementById('offline-badge');
+    if (count > 0) {
+      const html = `
+        <div id="offline-badge" style="background:rgba(249,215,70,0.15); border:1px solid rgba(249,215,70,0.4); border-radius:12px; padding:12px; margin-bottom:12px; display:flex; align-items:center; gap:10px;">
+          <i class="ti ti-cloud-off" style="color:#F9D746; font-size:1.5rem;"></i>
+          <div style="flex:1;">
+            <strong style="display:block; color:#F9D746; font-size:0.85rem;">${count} denúncia(s) aguardando envio</strong>
+            <span style="font-size:0.75rem; color:rgba(255,255,255,0.6);">Serão enviadas automaticamente quando houver conexão.</span>
+          </div>
+          ${navigator.onLine ? `<button class="btn btn-ghost" onclick="DB.processOfflineQueue()" style="padding:6px 12px; font-size:0.75rem;"><i class="ti ti-refresh"></i> Enviar</button>` : ''}
+        </div>`;
+      if (badge) {
+        badge.outerHTML = html;
+      } else {
+        list.insertAdjacentHTML('beforebegin', html);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  },
+
   renderMyReports() {
+    this.renderOfflineBadge();
     const list = document.getElementById('my-reports-list');
     if (!list) return;
     const tickets = DB.getMyTickets();
@@ -723,6 +767,7 @@ const Report = {
     lng: null,
     gpsLat: null,
     gpsLng: null,
+    gpsAccuracy: null,
     gpsReal: false,
     address: '',
     categoryId: null,
@@ -799,11 +844,13 @@ const Report = {
               this.state.lng = pos.coords.longitude;
               this.state.gpsLat = pos.coords.latitude; // âncora original do GPS
               this.state.gpsLng = pos.coords.longitude;
+              this.state.gpsAccuracy = pos.coords.accuracy; // precisão em metros
               this.state.gpsReal = true;
               this.reverseGeocode(this.state.lat, this.state.lng);
             },
             () => {
               this.state.gpsReal = false;
+              this.state.gpsAccuracy = null;
               this.state.address = 'Localização indisponível';
               this.updateGeoUI();
             },
@@ -811,6 +858,7 @@ const Report = {
           );
         } else {
           this.state.gpsReal = false;
+          this.state.gpsAccuracy = null;
           this.state.address = 'Localização indisponível';
         }
         this.showAICheck();
@@ -1054,8 +1102,27 @@ const Report = {
       return;
     }
     if (!this.state.gpsReal || this.state.lat == null) {
-      Toast.show('error', 'GPS obrigatório', 'Ative a localização para registrar a denúncia no local correto.');
+      Toast.show('error', 'GPS obrigatório', 'Ative a localização do dispositivo para registrar a denúncia no local correto.');
       return;
+    }
+    // Valida precisão do GPS — IP/WiFi dão precisão ruim (centenas de metros)
+    if (!CONFIG.DEV_MODE && this.state.gpsAccuracy != null && this.state.gpsAccuracy > CONFIG.MAX_GPS_ACCURACY) {
+      Toast.show('error', 'GPS impreciso', `Sua localização está imprecisa (±${Math.round(this.state.gpsAccuracy)}m). Use dados móveis com GPS ativo, ao ar livre, e tente novamente.`);
+      return;
+    }
+    // Valida que a denúncia está dentro de Santa Maria
+    if (!isInSantaMaria(this.state.lat, this.state.lng)) {
+      if (CONFIG.DEV_MODE) {
+        // Em modo dev, reposiciona no centro de Santa Maria para permitir teste
+        Toast.show('warning', 'Modo Dev', 'Localização fora de SM — reposicionando no centro para teste.');
+        this.state.lat = -29.6868;
+        this.state.lng = -53.8149;
+        this.state.gpsLat = -29.6868;
+        this.state.gpsLng = -53.8149;
+      } else {
+        Toast.show('error', 'Fora de Santa Maria', 'Esta plataforma aceita apenas denúncias dentro de Santa Maria/RS.');
+        return;
+      }
     }
     // Valida que o pin não foi arrastado para muito longe do GPS (máx 100m)
     if (this.state.gpsLat != null) {
@@ -1066,50 +1133,30 @@ const Report = {
       }
     }
     
-    Toast.show('info', 'Enviando...', 'Processando denúncia e fazendo upload da foto...', 3000);
-    
-    let finalImageUrl = this.state.photoData;
-    
-    // Upload da imagem para o Supabase Storage se for Base64 (foto da câmera)
-    if (finalImageUrl && finalImageUrl.startsWith('data:image')) {
-      try {
-        const res = await fetch(finalImageUrl);
-        const blob = await res.blob();
-        const fileName = `incident_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-        
-        const { error: uploadError } = await window.supabaseClient.storage
-          .from('report_images')
-          .upload(fileName, blob, { contentType: 'image/jpeg' });
-          
-        if (uploadError) {
-          console.error("FALHA NO UPLOAD DA IMAGEM:", uploadError);
-          Toast.show('warning', 'Aviso', 'A foto não pôde ser enviada, mas a denúncia será registrada.');
-        } else {
-          const { data: urlData } = window.supabaseClient.storage
-            .from('report_images')
-            .getPublicUrl(fileName);
-          finalImageUrl = urlData.publicUrl;
-          console.log("Imagem enviada com sucesso:", finalImageUrl);
-        }
-      } catch (e) {
-        console.error("Erro no upload", e);
-      }
-    }
+    Toast.show('info', 'Enviando...', 'Processando denúncia...', 3000);
 
     const session = DB.getSession();
     const isGovVerified = session ? session.isGovVerified : false;
-    
+
+    // Passa o base64 direto — o db.js cuida do upload (online) ou guarda (offline)
     const ticket = await DB.createTicket({
       categoryId: parseInt(this.state.categoryId, 10),
       description: desc,
-      photoData: finalImageUrl,
+      photoData: this.state.photoData,
       lat: this.state.lat,
       lng: this.state.lng,
       address: this.state.address,
       isGovVerified: isGovVerified,
     });
-    
-    if(!ticket) return;
+
+    if (!ticket) return;
+
+    // Se foi salvo offline, mostra tela específica
+    if (ticket.offline) {
+      this.reset();
+      return;
+    }
+
     this.showSuccess(ticket);
   },
 
@@ -1156,7 +1203,7 @@ const Report = {
   },
 
   reset() {
-    this.state = { photoData: null, lat: null, lng: null, gpsLat: null, gpsLng: null, gpsReal: false, address: '', categoryId: null };
+    this.state = { photoData: null, lat: null, lng: null, gpsLat: null, gpsLng: null, gpsAccuracy: null, gpsReal: false, address: '', categoryId: null };
     if (this._miniMap) { this._miniMap.remove(); this._miniMap = null; }
     const modal = document.getElementById('modal-report');
     if (modal) modal.classList.remove('open');
@@ -1276,9 +1323,9 @@ const Admin = {
   async rejectTicket(id) {
     const btn = document.querySelector(`button[onclick="Admin.rejectTicket('${id}')"]`);
     if (btn) { btn.disabled = true; btn.textContent = 'Rejeitando...'; }
-    const success = await DB.updateTicketStatus(id, 'resolvido');
+    const success = await DB.updateTicketStatus(id, 'rejeitado');
     if (success) {
-      Toast.show('info', 'Arquivada', 'A denúncia foi arquivada.');
+      Toast.show('info', 'Rejeitada', 'A denúncia foi rejeitada e não será publicada.');
       this.showDashboard();
       MapCtrl.renderMarkers();
       MapCtrl.updateStats();
@@ -1727,6 +1774,24 @@ document.addEventListener('DOMContentLoaded', () => {
        if (typeof setupNavigation === 'function') setupNavigation();
        
        if (!DB.isTutorialCompleted() && window.TutorialCtrl) TutorialCtrl.start();
+
+       // Processa denúncias offline pendentes ao iniciar (se houver internet)
+       if (navigator.onLine) DB.processOfflineQueue();
+
+       // Quando a conexão voltar, reenvia automaticamente a fila
+       window.addEventListener('online', () => {
+         Toast.show('info', 'Conexão restaurada', 'Verificando denúncias pendentes...');
+         DB.processOfflineQueue();
+       });
+       window.addEventListener('offline', () => {
+         Toast.show('warning', 'Sem conexão', 'Você está offline. Pode capturar denúncias e elas serão enviadas depois.');
+       });
+
+       // Atualiza o badge de pendentes na interface
+       window.addEventListener('offline_queue_changed', () => {
+         if (typeof ProfileCtrl !== 'undefined') ProfileCtrl.renderOfflineBadge();
+       });
+       if (typeof ProfileCtrl !== 'undefined' && ProfileCtrl.renderOfflineBadge) ProfileCtrl.renderOfflineBadge();
     });
     
     window.addEventListener('db_synced', () => {
@@ -1756,6 +1821,7 @@ window.SheetCtrl = SheetCtrl;
 window.MapCtrl = MapCtrl;
 window.Feed = Feed;
 window.ProfileCtrl = ProfileCtrl;
+window.DB = DB;
 window.Toast = Toast;
 // ===== ORIGINAL APP.JS CONTENT END =====
 } catch (e) {
